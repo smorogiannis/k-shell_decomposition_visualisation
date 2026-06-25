@@ -1,0 +1,2735 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>k-shell · lab — network decomposition visualizer</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,600;0,9..144,700;1,9..144,400;1,9..144,600&family=JetBrains+Mono:ital,wght@0,400;0,500;0,700;1,400&display=swap">
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <script src="algorithms.js"></script>
+    <script src="graph-io.js"></script>
+    <style>
+:root,
+:root[data-theme="dark"] {
+    /* Surfaces */
+    --bg: #0a0b0d;
+    --bg-elev: #14161a;
+    --bg-canvas: #0d0f12;
+    --bg-input: #0f1115;
+    --bg-hover: #1c1f24;
+
+    /* Borders */
+    --border: #24272d;
+    --border-strong: #3a3e46;
+    --border-accent: rgba(211, 255, 54, 0.4);
+
+    /* Text */
+    --text: #e8e4dc;
+    --text-muted: #8a8d94;
+    --text-faint: #4a4d53;
+
+    /* Accents */
+    --accent: #d3ff36;
+    --accent-fg: #0a0b0d;
+    --accent-soft: rgba(211, 255, 54, 0.10);
+    --accent-glow: rgba(211, 255, 54, 0.18);
+    --danger: #ff6b6b;
+    --warning: #f4a261;
+
+    /* Atmospherics */
+    --canvas-dot: rgba(255, 255, 255, 0.045);
+    --body-glow-1: rgba(211, 255, 54, 0.04);
+    --body-glow-2: rgba(124, 58, 237, 0.05);
+
+    /* Node default fill (no shell assigned yet) */
+    --node-empty: #3a3e46;
+    --node-empty-stroke: #6b6f78;
+
+    /* Typography */
+    --font-display: "Fraunces", "Newsreader", "Source Serif Pro", Georgia, serif;
+    --font-mono: "JetBrains Mono", "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
+    /* Rhythm */
+    --space-1: 4px;
+    --space-2: 8px;
+    --space-3: 12px;
+    --space-4: 16px;
+    --space-5: 24px;
+    --space-6: 32px;
+    --space-7: 48px;
+
+    --hairline: 1px solid var(--border);
+}
+
+:root[data-theme="light"] {
+    --bg: #f6f3ec;
+    --bg-elev: #fffdf7;
+    --bg-canvas: #f1ede4;
+    --bg-input: #efeae0;
+    --bg-hover: #e8e2d4;
+
+    --border: #d6d1c2;
+    --border-strong: #9b9683;
+    --border-accent: rgba(74, 124, 0, 0.45);
+
+    --text: #1a1815;
+    --text-muted: #5e594d;
+    --text-faint: #8a8474;
+
+    /* In light mode the accent shifts to a deep olive — same energy, paper-friendly */
+    --accent: #4a7c00;
+    --accent-fg: #fffdf7;
+    --accent-soft: rgba(74, 124, 0, 0.10);
+    --accent-glow: rgba(74, 124, 0, 0.20);
+    --danger: #c0392b;
+    --warning: #c2682c;
+
+    --canvas-dot: rgba(0, 0, 0, 0.06);
+    --body-glow-1: rgba(74, 124, 0, 0.05);
+    --body-glow-2: rgba(180, 90, 30, 0.05);
+
+    --node-empty: #d8d3c3;
+    --node-empty-stroke: #6e6957;
+}
+
+/* Smooth theme switch */
+html, body, .card, .form-control, .btn, .canvas-wrap, .algorithm-info, .legend-item, .instructions {
+    transition: background-color 0.25s ease, color 0.25s ease, border-color 0.25s ease;
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+
+html, body {
+    margin: 0;
+    padding: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font-mono);
+    font-size: 13px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+}
+
+body {
+    background:
+        radial-gradient(ellipse 80% 60% at 50% -10%, var(--body-glow-1), transparent 60%),
+        radial-gradient(ellipse 60% 80% at 100% 100%, var(--body-glow-2), transparent 60%),
+        var(--bg);
+    min-height: 100vh;
+    overflow-x: hidden;
+}
+
+::selection { background: var(--accent); color: var(--accent-fg); }
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: var(--border-strong); }
+
+/* ============ HEADER ============ */
+.site-header {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    padding: var(--space-5) var(--space-6);
+    border-bottom: var(--hairline);
+    gap: var(--space-6);
+}
+
+.brand {
+    display: flex;
+    align-items: baseline;
+    gap: var(--space-3);
+}
+
+.brand__mark {
+    font-family: var(--font-display);
+    font-style: italic;
+    font-weight: 600;
+    font-size: 28px;
+    letter-spacing: -0.02em;
+    line-height: 1;
+    color: var(--text);
+}
+
+.brand__mark em {
+    color: var(--accent);
+    font-style: normal;
+}
+
+.brand__sub {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+}
+
+.site-header__meta {
+    display: flex;
+    align-items: baseline;
+    gap: var(--space-5);
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+}
+
+.site-header__meta a {
+    color: var(--text-muted);
+    text-decoration: none;
+    border-bottom: 1px dotted var(--border-strong);
+    padding-bottom: 1px;
+    transition: color 0.15s ease, border-color 0.15s ease;
+}
+
+.site-header__meta a:hover {
+    color: var(--accent);
+    border-bottom-color: var(--accent);
+}
+
+.network-badge {
+    padding: 2px 8px;
+    border: 1px solid var(--border-accent);
+    color: var(--accent);
+    font-size: 10px;
+    letter-spacing: 0.12em;
+}
+
+.file-input-hidden {
+    position: absolute;
+    width: 0;
+    height: 0;
+    opacity: 0;
+    pointer-events: none;
+}
+
+.import-status {
+    font-size: 11px;
+    color: var(--text-muted);
+    min-height: 1.2em;
+}
+
+.import-status--error { color: var(--danger); }
+.import-status--ok { color: var(--accent); }
+
+.theme-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    background: transparent;
+    border: 1px solid var(--border-strong);
+    color: var(--text-muted);
+    font-family: var(--font-mono);
+    font-size: 10px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    cursor: pointer;
+    border-radius: 0;
+    transition: all 0.2s ease;
+}
+
+.theme-toggle:hover {
+    color: var(--accent);
+    border-color: var(--accent);
+}
+
+.theme-toggle__sun {
+    font-size: 13px;
+    line-height: 1;
+    display: inline-block;
+    transition: transform 0.4s ease;
+}
+
+:root[data-theme="light"] .theme-toggle__sun {
+    transform: rotate(180deg);
+}
+
+/* ============ APP LAYOUT ============ */
+.app-container {
+    display: grid;
+    grid-template-columns: 320px 1fr 320px;
+    gap: var(--space-5);
+    padding: var(--space-5) var(--space-6);
+    min-height: calc(100vh - 80px);
+}
+
+.left-panel, .right-panel {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-5);
+    min-width: 0;
+}
+
+.main-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    min-width: 0;
+}
+
+@media (max-width: 1100px) {
+    .app-container {
+        grid-template-columns: 1fr;
+    }
+}
+
+/* ============ CARDS ============ */
+.card {
+    background: var(--bg-elev);
+    border: var(--hairline);
+    border-radius: 0;
+    overflow: hidden;
+    transition: border-color 0.2s ease;
+}
+
+.card:hover { border-color: var(--border-strong); }
+
+.card__header {
+    padding: var(--space-4) var(--space-5);
+    border-bottom: var(--hairline);
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: var(--space-3);
+}
+
+.card__header h2,
+.card__header h3 {
+    margin: 0;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+}
+
+.card__body {
+    padding: var(--space-5);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-4);
+}
+
+/* The main canvas card has no internal padding */
+.main-panel .card { display: flex; flex-direction: column; flex: 0 0 auto; }
+.main-panel .card.canvas-card { flex: 1; }
+.main-panel .card.canvas-card .card__body { padding: 0; flex: 1; display: flex; }
+
+/* ============ FORM CONTROLS ============ */
+.form-group { display: flex; flex-direction: column; gap: var(--space-2); }
+
+.form-label {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    font-weight: 500;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+}
+
+.form-control {
+    width: 100%;
+    padding: var(--space-3) var(--space-3);
+    background: var(--bg-input);
+    border: var(--hairline);
+    color: var(--text);
+    font-family: var(--font-mono);
+    font-size: 12px;
+    line-height: 1.4;
+    border-radius: 0;
+    appearance: none;
+    -webkit-appearance: none;
+    transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.form-control:focus {
+    outline: none;
+    border-color: var(--accent);
+    background: var(--bg-hover);
+}
+
+.form-control:hover { background: var(--bg-hover); }
+
+select.form-control {
+    background-image:
+        linear-gradient(45deg, transparent 50%, var(--text-muted) 50%),
+        linear-gradient(135deg, var(--text-muted) 50%, transparent 50%);
+    background-position:
+        calc(100% - 14px) calc(50% - 2px),
+        calc(100% - 9px) calc(50% - 2px);
+    background-size: 5px 5px;
+    background-repeat: no-repeat;
+    padding-right: var(--space-6);
+    cursor: pointer;
+}
+
+input[type="range"] {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 100%;
+    height: 24px;
+    background: transparent;
+    cursor: pointer;
+}
+
+input[type="range"]::-webkit-slider-runnable-track {
+    height: 1px;
+    background: var(--border-strong);
+}
+
+input[type="range"]::-moz-range-track {
+    height: 1px;
+    background: var(--border-strong);
+}
+
+input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 12px;
+    height: 12px;
+    margin-top: -5.5px;
+    background: var(--accent);
+    border: 0;
+    border-radius: 0;
+    box-shadow: 0 0 0 4px var(--bg-elev);
+    cursor: grab;
+}
+
+input[type="range"]::-moz-range-thumb {
+    width: 12px;
+    height: 12px;
+    background: var(--accent);
+    border: 0;
+    border-radius: 0;
+    box-shadow: 0 0 0 4px var(--bg-elev);
+    cursor: grab;
+}
+
+/* ============ BUTTONS ============ */
+.btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-2);
+    padding: var(--space-3) var(--space-4);
+    border: 1px solid var(--border-strong);
+    background: transparent;
+    color: var(--text);
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    cursor: pointer;
+    border-radius: 0;
+    transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease, transform 0.05s ease;
+    white-space: nowrap;
+    user-select: none;
+}
+
+.btn:hover {
+    background: var(--bg-hover);
+    border-color: var(--text-muted);
+}
+
+.btn:active { transform: translateY(1px); }
+
+.btn:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+}
+
+.btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+    pointer-events: none;
+}
+
+.btn--primary {
+    background: var(--accent);
+    color: var(--accent-fg);
+    border-color: var(--accent);
+}
+
+.btn--primary:hover {
+    background: var(--text);
+    border-color: var(--text);
+    color: var(--accent-fg);
+}
+
+.btn--secondary { background: var(--bg-input); }
+.btn--outline  { background: transparent; }
+
+.btn--sm {
+    padding: var(--space-2) var(--space-3);
+    font-size: 10px;
+}
+
+/* ============ UTILITIES ============ */
+.flex { display: flex; }
+.gap-8 { gap: var(--space-2); }
+.justify-between { justify-content: space-between; }
+.items-center { align-items: center; }
+.mb-0  { margin-bottom: 0; }
+.mb-8  { margin-bottom: var(--space-2); }
+.mb-16 { margin-bottom: var(--space-4); }
+.mt-16 { margin-top: var(--space-4); }
+.color-text-secondary { color: var(--text-muted); }
+
+/* ============ INSTRUCTIONS ============ */
+.instructions {
+    margin-top: var(--space-2);
+    padding: var(--space-4);
+    background: var(--bg-input);
+    border-left: 2px solid var(--accent);
+}
+
+.instructions h4 {
+    margin: 0 0 var(--space-2) 0;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    font-weight: 500;
+}
+
+.instructions ul {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    font-size: 12px;
+    color: var(--text);
+}
+
+.instructions li {
+    padding: 2px 0;
+    position: relative;
+    padding-left: var(--space-4);
+    color: var(--text-muted);
+}
+
+.instructions li::before {
+    content: "→";
+    position: absolute;
+    left: 0;
+    color: var(--accent);
+}
+
+.instructions kbd,
+.pending-hint kbd {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    padding: 1px 5px;
+    border: 1px solid var(--border-strong);
+    background: var(--bg);
+    color: var(--text);
+    border-radius: 2px;
+}
+
+.pending-hint {
+    margin-bottom: var(--space-3);
+    padding: var(--space-2) var(--space-3);
+    border-left: 2px solid var(--accent);
+    background: var(--accent-soft);
+    color: var(--text);
+    font-size: 11px;
+    line-height: 1.5;
+}
+
+/* ============ ALGORITHM INFO ============ */
+.algorithm-info {
+    padding: var(--space-4);
+    background: var(--bg-input);
+    border: var(--hairline);
+    font-size: 12px;
+    color: var(--text);
+    line-height: 1.6;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+}
+
+.algorithm-info__title {
+    font-family: var(--font-display);
+    font-style: italic;
+    font-weight: 600;
+    font-size: 16px;
+    letter-spacing: -0.01em;
+    color: var(--text);
+}
+
+.algorithm-info__formula {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    line-height: 1.8;
+    padding: var(--space-3);
+    background: var(--bg);
+    border-left: 2px solid var(--accent);
+    color: var(--text);
+    overflow-x: auto;
+    white-space: pre;
+}
+
+.algorithm-info__cite {
+    font-size: 10px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-faint);
+}
+
+.algorithm-info__cite a {
+    color: var(--text-muted);
+    text-decoration: none;
+    border-bottom: 1px dotted var(--text-faint);
+}
+
+.algorithm-info__cite a:hover {
+    color: var(--accent);
+    border-color: var(--accent);
+}
+
+.animation-controls {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+    margin-top: var(--space-2);
+}
+
+.animation-controls .btn--primary { flex: 1 1 auto; }
+
+/* ============ CANVAS ============ */
+.canvas-wrap {
+    position: relative;
+    flex: 1;
+    background:
+        radial-gradient(circle 1px at center, var(--canvas-dot) 1px, transparent 1.5px) 0 0 / 28px 28px,
+        var(--bg-canvas);
+    overflow: hidden;
+}
+
+.progress-rail {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 2px;
+    background: var(--border);
+    overflow: hidden;
+    z-index: 4;
+}
+
+.progress-rail .progress-fill {
+    height: 100%;
+    width: 0%;
+    background: linear-gradient(90deg, var(--accent) 0%, #ff7e36 100%);
+    transition: width 0.18s ease-out;
+    box-shadow: 0 0 12px var(--accent-glow);
+}
+
+#graphSvg {
+    display: block;
+    width: 100%;
+    height: 100%;
+    cursor: crosshair;
+}
+
+.welcome-message {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    pointer-events: none;
+    text-align: center;
+    padding: var(--space-6);
+    gap: var(--space-5);
+}
+
+.welcome-message__title {
+    font-family: var(--font-display);
+    font-weight: 600;
+    font-size: 56px;
+    line-height: 0.95;
+    letter-spacing: -0.03em;
+    margin: 0;
+    color: var(--text);
+}
+
+.welcome-message__title em {
+    font-style: italic;
+    font-weight: 400;
+    color: var(--accent);
+}
+
+.welcome-message__sub {
+    font-size: 13px;
+    color: var(--text-muted);
+    max-width: 460px;
+    margin: 0;
+    line-height: 1.6;
+}
+
+.formula-stack {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    font-family: var(--font-mono);
+    font-size: 13px;
+    color: var(--text-muted);
+    margin-top: var(--space-4);
+}
+
+.formula-stack span { white-space: nowrap; }
+.formula-stack .accent { color: var(--accent); }
+
+.canvas-overlay {
+    position: absolute;
+    bottom: var(--space-3);
+    left: var(--space-4);
+    display: flex;
+    gap: var(--space-5);
+    font-family: var(--font-mono);
+    font-size: 10px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--text-faint);
+    z-index: 3;
+    pointer-events: none;
+}
+
+.canvas-overlay span strong {
+    color: var(--text);
+    font-weight: 500;
+    margin-left: 6px;
+}
+
+/* ============ STATS / KEY-VALUE ============ */
+.kv {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    padding: var(--space-2) 0;
+    border-bottom: 1px dashed var(--border);
+    font-size: 12px;
+}
+
+.kv:last-child { border-bottom: 0; }
+
+.kv__key {
+    color: var(--text-muted);
+    font-size: 10px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+}
+
+.kv__val {
+    font-feature-settings: "tnum";
+    font-variant-numeric: tabular-nums;
+    color: var(--text);
+    font-weight: 500;
+}
+
+/* ============ RESULTS TABLE ============ */
+.results-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-family: var(--font-mono);
+    font-size: 11px;
+}
+
+.results-table th {
+    text-align: left;
+    padding: var(--space-2) var(--space-2);
+    font-weight: 500;
+    font-size: 10px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    border-bottom: var(--hairline);
+}
+
+.results-table td {
+    padding: var(--space-2);
+    border-bottom: 1px solid var(--border);
+    color: var(--text);
+    font-feature-settings: "tnum";
+    font-variant-numeric: tabular-nums;
+}
+
+.results-table tr:last-child td { border-bottom: 0; }
+.results-table tr:hover td { background: var(--bg-input); }
+
+.results-nodes-section { margin-bottom: var(--space-4); }
+
+.results-table-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-2);
+    margin-bottom: var(--space-2);
+    flex-wrap: wrap;
+}
+
+.results-table-toolbar__actions {
+    display: flex;
+    gap: var(--space-2);
+    flex-wrap: wrap;
+}
+
+.results-table-wrap {
+    position: relative;
+    overflow: hidden;
+    border: var(--hairline);
+}
+
+.results-table-wrap.is-collapsed {
+    max-height: 220px;
+}
+
+.results-table-wrap.is-collapsed::after {
+    content: "";
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: 48px;
+    background: linear-gradient(to bottom, transparent, var(--bg-elev));
+    pointer-events: none;
+}
+
+.results-table-wrap.is-expanded {
+    max-height: none;
+}
+
+.results-table-wrap .results-table { border-collapse: collapse; }
+.results-table-wrap .results-table th { background: var(--bg-input); }
+
+.form-check {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    margin-top: var(--space-3);
+    font-size: 12px;
+    color: var(--text-muted);
+    cursor: pointer;
+    user-select: none;
+}
+
+.form-check input[type="checkbox"] {
+    width: 14px;
+    height: 14px;
+    margin: 0;
+    accent-color: var(--accent);
+    cursor: pointer;
+}
+
+/* ============ SHELL DISTRIBUTION ACTIONS ============ */
+.shell-dist-actions {
+    margin-top: var(--space-4);
+    padding-top: var(--space-4);
+    border-top: var(--hairline);
+}
+
+.shell-dist-actions .btn { width: 100%; }
+
+.shell-dist-select-row {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+}
+
+/* ============ MODAL ============ */
+.modal {
+    position: fixed;
+    inset: 0;
+    z-index: 1000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: var(--space-5);
+}
+
+.modal[hidden] { display: none; }
+
+.modal__backdrop {
+    position: absolute;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.55);
+}
+
+.modal__panel {
+    position: relative;
+    width: min(560px, 100%);
+    background: var(--bg-elev);
+    border: var(--hairline);
+    box-shadow: 0 24px 48px rgba(0, 0, 0, 0.35);
+}
+
+.modal__header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: var(--space-4) var(--space-5);
+    border-bottom: var(--hairline);
+}
+
+.modal__header h3 {
+    margin: 0;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    font-weight: 500;
+}
+
+.modal__close {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    background: transparent;
+    border: var(--hairline);
+    color: var(--text-muted);
+    font-family: var(--font-mono);
+    font-size: 16px;
+    line-height: 1;
+    cursor: pointer;
+    transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+}
+
+.modal__close:hover {
+    color: var(--text);
+    border-color: var(--border-strong);
+    background: var(--bg-hover);
+}
+
+.modal__body {
+    padding: var(--space-4) var(--space-5) var(--space-5);
+}
+
+.modal__actions {
+    display: flex;
+    justify-content: flex-end;
+    margin-top: var(--space-4);
+}
+
+#shellDistPlot svg {
+    display: block;
+    width: 100%;
+    height: auto;
+}
+
+/* ============ STATUS PILL ============ */
+.status {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 8px;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    border: var(--hairline);
+}
+
+.status--info {
+    color: var(--accent);
+    border-color: var(--accent);
+    background: var(--accent-soft);
+}
+
+/* ============ HEADERS INSIDE BODY ============ */
+.card__body h4, .card__body h5 {
+    margin: 0;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    font-weight: 500;
+}
+
+.card__body p {
+    margin: 0;
+    font-size: 12px;
+    color: var(--text-muted);
+}
+
+/* ============ SVG ELEMENTS ============ */
+.link {
+    transition: stroke-opacity 0.2s ease;
+}
+
+.node {
+    cursor: grab;
+    transition: stroke 0.2s ease, stroke-width 0.2s ease;
+}
+
+.node:active { cursor: grabbing; }
+
+@keyframes node-pulse {
+    0%, 100% { filter: drop-shadow(0 0 0 transparent); }
+    50%      { filter: drop-shadow(0 0 6px var(--accent-glow)); }
+}
+
+.node--pending {
+    animation: node-pulse 1.4s ease-in-out infinite;
+}
+
+.node-label {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    /* Always dark — shell palettes are tuned bright in both themes */
+    fill: #0a0b0d;
+    pointer-events: none;
+    text-anchor: middle;
+    dominant-baseline: middle;
+    font-weight: 700;
+    user-select: none;
+}
+
+/* ============ FOOTER ============ */
+.site-footer {
+    border-top: var(--hairline);
+    padding: var(--space-4) var(--space-6);
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: var(--space-5);
+    font-size: 10px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--text-faint);
+    flex-wrap: wrap;
+}
+
+.site-footer a {
+    color: var(--text-muted);
+    text-decoration: none;
+    border-bottom: 1px dotted var(--text-faint);
+}
+
+.site-footer a:hover { color: var(--accent); border-color: var(--accent); }
+
+/* ============ ENTRANCE ANIMATIONS ============ */
+@keyframes rise-in {
+    from { opacity: 0; transform: translateY(8px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+
+.site-header { animation: rise-in 0.5s ease-out both; }
+.left-panel  { animation: rise-in 0.6s ease-out 0.05s both; }
+.main-panel  { animation: rise-in 0.6s ease-out 0.10s both; }
+.right-panel { animation: rise-in 0.6s ease-out 0.15s both; }
+.site-footer { animation: rise-in 0.5s ease-out 0.20s both; }
+
+@media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+        animation-duration: 0.01ms !important;
+        transition-duration: 0.01ms !important;
+    }
+}
+    </style>
+</head>
+<body>
+    <header class="site-header">
+        <div class="brand">
+            <span class="brand__mark">k-shell <em>·</em> lab</span>
+            <span class="brand__sub">network decomposition · spreader analysis</span>
+        </div>
+        <div class="site-header__meta">
+            <span class="network-badge" title="All algorithms assume simple graphs">undirected · unweighted</span>
+            <span>v.3.0 · 2026</span>
+            <button id="themeToggle" class="theme-toggle" type="button" title="Toggle light / dark" aria-label="Toggle theme">
+                <span class="theme-toggle__sun" aria-hidden="true">◐</span>
+                <span class="theme-toggle__label">Light</span>
+            </button>
+        </div>
+    </header>
+
+    <div class="app-container">
+        <aside class="left-panel">
+            <section class="card">
+                <header class="card__header"><h3>Graph Editor</h3></header>
+                <div class="card__body">
+                    <div class="form-group">
+                        <label class="form-label" for="exampleGraphs">Example Graphs</label>
+                        <select id="exampleGraphs" class="form-control">
+                            <option value="">Select an example…</option>
+                            <optgroup label="From the papers">
+                                <option value="kitsak">Nested shells · Kitsak ’10</option>
+                                <option value="liu">Core-like groups · Liu ’15</option>
+                                <option value="li_huang">Branched tree · Li &amp; Huang ’21</option>
+                            </optgroup>
+                            <optgroup label="Classics">
+                                <option value="star">Star (hub + leaves)</option>
+                                <option value="path">Path graph</option>
+                                <option value="cycle">Cycle (ring)</option>
+                                <option value="karate_subset">Friendship subset (8 nodes)</option>
+                            </optgroup>
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label">Import / Export</label>
+                        <input type="file" id="graphFileInput" class="file-input-hidden"
+                               accept=".txt,.json"
+                               aria-label="Import graph file">
+                        <div class="flex gap-8" style="flex-wrap: wrap;">
+                            <button id="importGraphBtn" type="button" class="btn btn--primary btn--sm">Import file</button>
+                            <button id="exportEdgelistBtn" type="button" class="btn btn--outline btn--sm" disabled>Export .txt</button>
+                            <button id="exportJsonBtn" type="button" class="btn btn--outline btn--sm" disabled>Export .json</button>
+                        </div>
+                        <p id="importStatus" class="import-status" aria-live="polite"></p>
+                        <p class="color-text-secondary" style="font-size: 11px; margin: 0;">
+                            Edge list: one <code>u v</code> per line. Also JSON Weights ignored.
+                        </p>
+                    </div>
+
+                    <div class="flex gap-8">
+                        <button id="clearGraph" class="btn btn--secondary btn--sm">Clear All</button>
+                        <button id="randomGraph" class="btn btn--outline btn--sm">Random</button>
+                    </div>
+
+                    <div class="instructions">
+                        <h4>Interactions</h4>
+                        <ul>
+                            <li>Click empty space to add a node</li>
+                            <li>Click two nodes in turn to connect them</li>
+                            <li>Drag a node to reposition it</li>
+                            <li>Right-click any node to delete it</li>
+                            <li>Press <kbd>Esc</kbd> to cancel a pending connection</li>
+                        </ul>
+                    </div>
+                </div>
+            </section>
+
+            <section class="card">
+                <header class="card__header"><h3>Algorithm</h3></header>
+                <div class="card__body">
+                    <div class="form-group">
+                        <label class="form-label" for="algorithmSelect">Method</label>
+                        <select id="algorithmSelect" class="form-control">
+                            <option value="standard">Standard K-Shell</option>
+                            <option value="redundant">Redundant Link Removal</option>
+                            <option value="dk-gravity">Improved Gravity Model</option>
+                            <option value="propagation-entropy">Node Propagation Entropy</option>
+                            <option value="entropy-k-shell">Information Entropy K-Shell</option>
+                        </select>
+                    </div>
+
+                    <div id="algorithmInfo" class="algorithm-info"></div>
+
+                    <label class="form-check" for="animateAlgorithm">
+                        <input type="checkbox" id="animateAlgorithm" checked>
+                        <span>Animate decomposition</span>
+                    </label>
+
+                    <div class="animation-controls">
+                        <button id="runAlgorithm" class="btn btn--primary">Run</button>
+                        <button id="playAnimation" class="btn btn--outline btn--sm" disabled>Play</button>
+                        <button id="stepAlgorithm" class="btn btn--outline btn--sm" disabled>Step</button>
+                        <button id="resetAnimation" class="btn btn--secondary btn--sm" disabled>Reset</button>
+                    </div>
+
+                    <div class="form-group mt-16">
+                        <label class="form-label" for="speedSlider">Animation Speed</label>
+                        <input type="range" id="speedSlider" min="0.5" max="3" step="0.1" value="1" aria-label="Animation speed">
+                    </div>
+                </div>
+            </section>
+        </aside>
+
+        <main class="main-panel">
+            <section class="card canvas-card">
+                <header class="card__header flex justify-between items-center">
+                    <h2>Decomposition Canvas</h2>
+                    <div class="flex gap-8">
+                        <select id="colorScheme" class="form-control" aria-label="Color scheme">
+                            <option value="rainbow">Rainbow</option>
+                            <option value="cool">Cool</option>
+                            <option value="warm">Warm</option>
+                        </select>
+                        <button id="layoutToggle" class="btn btn--outline btn--sm" title="Switch layout"><span aria-hidden="true">↻</span> Shell Layout</button>
+                    </div>
+                </header>
+                <div class="card__body">
+                    <div class="canvas-wrap">
+                        <div class="progress-rail" aria-hidden="true">
+                            <div id="progressFill" class="progress-fill"></div>
+                        </div>
+                        <svg id="graphSvg" width="100%" height="100%">
+                            <defs>
+                                <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+                                    <polygon points="0 0, 10 3.5, 0 7" fill="var(--border-strong)" />
+                                </marker>
+                            </defs>
+                        </svg>
+
+                        <div id="welcomeMessage" class="welcome-message">
+                            <h1 class="welcome-message__title">k-shell <em>decomposition</em></h1>
+                            <p class="welcome-message__sub">Build a graph on the canvas, load an example, import an edge-list file, or create a random graph — then run an algorithm to watch nodes peel into hierarchical shells. Unweighted, undirected networks only.</p>
+                        </div>
+
+                        <div class="canvas-overlay">
+                            <span>algo<strong id="overlayAlgo">—</strong></span>
+                            <span>step<strong id="overlayStep">0 / 0</strong></span>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </main>
+
+        <aside class="right-panel">
+            <section class="card">
+                <header class="card__header"><h3>Graph Statistics</h3></header>
+                <div class="card__body">
+                    <div class="kv"><span class="kv__key">Nodes</span><span class="kv__val" id="nodeCount">0</span></div>
+                    <div class="kv"><span class="kv__key">Edges</span><span class="kv__val" id="edgeCount">0</span></div>
+                    <div class="kv"><span class="kv__key">Avg Degree</span><span class="kv__val" id="avgDegree">0</span></div>
+                    <div class="kv"><span class="kv__key">Max Degree</span><span class="kv__val" id="maxDegree">0</span></div>
+                </div>
+            </section>
+
+            <section class="card">
+                <header class="card__header"><h3>Results</h3></header>
+                <div class="card__body">
+                    <div id="resultsContainer">
+                        <p class="color-text-secondary">Run an algorithm to see results.</p>
+                    </div>
+                    <div id="shellDistActions" class="shell-dist-actions" style="display: none;">
+                        <button type="button" class="btn btn--secondary btn--sm" id="shellDistPlotBtn">View distribution plot</button>
+                    </div>
+                </div>
+            </section>
+
+            <section class="card">
+                <header class="card__header"><h3>Node Inspector</h3></header>
+                <div class="card__body">
+                    <div id="nodeInfo">
+                        <p class="color-text-secondary">Click a node to see details.</p>
+                    </div>
+                </div>
+            </section>
+        </aside>
+    </div>
+
+    <footer class="site-footer">
+        <span>k-shell · lab</span>
+		<span>created by sotiris morogiannis for e-ce uth diploma thesis</span>
+        <span>Part of <a href="https://dana.e-ce.uth.gr/index.html">DANA Lab</a></span>
+    </footer>
+
+    <div id="shellDistModal" class="modal" hidden>
+        <div class="modal__backdrop" id="shellDistModalBackdrop"></div>
+        <div class="modal__panel" role="dialog" aria-labelledby="shellDistModalTitle" aria-modal="true">
+            <header class="modal__header">
+                <h3 id="shellDistModalTitle">Shell distribution</h3>
+                <button type="button" class="modal__close" id="shellDistModalClose" aria-label="Close">&times;</button>
+            </header>
+            <div class="modal__body">
+                <div id="shellDistPlot"></div>
+                <div class="modal__actions">
+                    <button type="button" id="shellDistSaveImage" class="btn btn--secondary btn--sm">Save image</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Application state
+        const state = {
+            nodes: [],
+            edges: [],
+            nodeIdCounter: 1,
+            isAnimating: false,
+            currentStep: 0,
+            animationResults: null,
+            selectedNode: null,
+            draggedNode: null,
+            pendingEdgeSource: null,
+            layout: 'force', // 'force' or 'shell'
+            resultsTableExpanded: false,
+        };
+
+        const RESULTS_PREVIEW_ROWS = 10;
+        
+        // Color schemes
+        // Shell palettes ordered from low-shell (peripheral) to high-shell (core).
+        const colorSchemes = {
+            rainbow: ['#7c3aed', '#3b82f6', '#06b6d4', '#10b981', '#eab308', '#f97316', '#ef4444', '#ec4899'],
+            cool:    ['#1e3a8a', '#2563eb', '#0ea5e9', '#06b6d4', '#14b8a6', '#10b981', '#84cc16', '#bef264'],
+            warm:    ['#581c87', '#7c2d12', '#9a3412', '#c2410c', '#ea580c', '#f97316', '#fbbf24', '#facc15']
+        };
+
+        function shellColor(shell) {
+            if (shell === null || shell === undefined) return 'var(--node-empty)';
+            const palette = colorSchemes[document.getElementById('colorScheme').value] || colorSchemes.rainbow;
+            return palette[Math.min(shell, palette.length - 1)];
+        }
+
+        function shellStroke(node) {
+            if (state.pendingEdgeSource && state.pendingEdgeSource.id === node.id) return 'var(--accent)';
+            if (node === state.selectedNode) return 'var(--accent)';
+            if (node.shell === null || node.shell === undefined) return 'var(--node-empty-stroke)';
+            return 'var(--border-strong)';
+        }
+        
+        // Example graphs data
+        const exampleGraphs = {
+            kitsak: {
+                nodes: [
+                    {id: 1, x: 180, y: 130},
+                    {id: 2, x: 270, y: 220},
+                    {id: 3, x: 300, y: 410},
+                    {id: 4, x: 430, y: 410},
+                    {id: 5, x: 590, y: 410},
+                    {id: 6, x: 590, y: 230},
+                    {id: 7, x: 430, y: 230},
+                    {id: 8, x: 730, y: 380},
+                    {id: 9, x: 650, y: 110}
+                ],
+                edges: [
+                    {source: 1, target: 2}, {source: 9, target: 6}, {source: 8, target: 5},
+                    {source: 2, target: 3}, {source: 2, target: 7},
+                    {source: 3, target: 4}, {source: 3, target: 7},
+                    {source: 4, target: 5}, {source: 4, target: 6}, {source: 4, target: 7},
+                    {source: 5, target: 6}, {source: 5, target: 7}, {source: 6, target: 7}
+                ]
+            },
+            liu: {
+                nodes: [
+                    {id: 1, x: 160, y: 240},
+                    {id: 2, x: 110, y: 280},
+                    {id: 3, x: 110, y: 340},
+                    {id: 4, x: 160, y: 380},
+                    {id: 5, x: 220, y: 310},
+                    {id: 6, x: 290, y: 310},
+                    {id: 7, x: 360, y: 310},
+                    {id: 8, x: 430, y: 310},
+                    {id: 9,  x: 500, y: 310},
+                    {id: 10, x: 560, y: 270},
+                    {id: 11, x: 600, y: 320},
+                    {id: 12, x: 560, y: 360}
+                ],
+                edges: [
+                    {source: 1, target: 2}, {source: 1, target: 3}, {source: 1, target: 4}, {source: 1, target: 5},
+                    {source: 2, target: 3}, {source: 2, target: 4}, {source: 2, target: 5},
+                    {source: 3, target: 4}, {source: 3, target: 5},
+                    {source: 4, target: 5},
+                    {source: 5, target: 6}, {source: 6, target: 7},
+                    {source: 7, target: 8}, {source: 8, target: 9},
+                    {source: 6, target: 10}, {source: 7, target: 11}, {source: 7, target: 12},
+                    {source: 9, target: 10}, {source: 9, target: 11}, {source: 9, target: 12},
+                    {source: 10, target: 11}, {source: 10, target: 12},
+                    {source: 11, target: 12}
+                ]
+            },
+
+            li_huang: {
+                nodes: [
+                    {id: 1, x: 400, y: 240},
+                    {id: 2, x: 350, y: 320},
+                    {id: 3, x: 450, y: 320},
+                    {id: 4, x: 400, y: 180},
+                    {id: 5, x: 400, y: 130},
+                    {id: 6, x: 400, y:  80},
+                    {id: 7, x: 290, y: 360},
+                    {id: 8, x: 240, y: 400},
+                    {id: 9, x: 190, y: 440},
+                    {id: 10, x: 510, y: 360},
+                    {id: 11, x: 570, y: 400}
+                ],
+                edges: [
+                    {source: 1, target: 2}, {source: 1, target: 3}, {source: 2, target: 3},
+                    {source: 1, target: 4}, {source: 4, target: 5}, {source: 5, target: 6},
+                    {source: 2, target: 7}, {source: 7, target: 8}, {source: 8, target: 9},
+                    {source: 3, target: 10}, {source: 10, target: 11}
+                ]
+            },
+
+            star: {
+                nodes: [
+                    {id: 1, x: 400, y: 300},
+                    {id: 2, x: 250, y: 200}, {id: 3, x: 550, y: 200},
+                    {id: 4, x: 250, y: 400}, {id: 5, x: 550, y: 400},
+                    {id: 6, x: 320, y: 120}, {id: 7, x: 480, y: 120}
+                ],
+                edges: [
+                    {source: 1, target: 2}, {source: 1, target: 3}, {source: 1, target: 4},
+                    {source: 1, target: 5}, {source: 1, target: 6}, {source: 1, target: 7}
+                ]
+            },
+
+            path: {
+                nodes: [
+                    {id: 1, x: 120, y: 300}, {id: 2, x: 220, y: 300},
+                    {id: 3, x: 320, y: 300}, {id: 4, x: 420, y: 300},
+                    {id: 5, x: 520, y: 300}, {id: 6, x: 620, y: 300}
+                ],
+                edges: [
+                    {source: 1, target: 2}, {source: 2, target: 3},
+                    {source: 3, target: 4}, {source: 4, target: 5},
+                    {source: 5, target: 6}
+                ]
+            },
+
+            cycle: {
+                nodes: [
+                    {id: 1, x: 400, y: 140}, {id: 2, x: 520, y: 220},
+                    {id: 3, x: 480, y: 360}, {id: 4, x: 320, y: 360},
+                    {id: 5, x: 280, y: 220}
+                ],
+                edges: [
+                    {source: 1, target: 2}, {source: 2, target: 3},
+                    {source: 3, target: 4}, {source: 4, target: 5},
+                    {source: 5, target: 1}
+                ]
+            },
+
+            karate_subset: {
+                nodes: [
+                    {id: 1, x: 200, y: 280}, {id: 2, x: 320, y: 200},
+                    {id: 3, x: 440, y: 280}, {id: 4, x: 560, y: 200},
+                    {id: 5, x: 280, y: 380}, {id: 6, x: 400, y: 420},
+                    {id: 7, x: 520, y: 380}, {id: 8, x: 640, y: 320}
+                ],
+                edges: [
+                    {source: 1, target: 2}, {source: 1, target: 3},
+                    {source: 2, target: 3}, {source: 2, target: 4},
+                    {source: 3, target: 4}, {source: 3, target: 5},
+                    {source: 4, target: 6}, {source: 5, target: 6},
+                    {source: 6, target: 7}, {source: 6, target: 8},
+                    {source: 7, target: 8}
+                ]
+            }
+        };
+        
+        // Algorithm descriptions
+        const algorithmDescriptions = {
+            'standard': {
+                title: 'Standard k-shell decomposition',
+                blurb: 'Iteratively prune nodes with current degree ≤ k, assigning them shell k, until the graph is empty.',
+                formula: 'while V ≠ ∅:\n  while ∃ v with deg(v) ≤ k:\n    shell(v) ← k; remove v\n  k ← k + 1',
+                cite: { authors: 'Kitsak et al.', venue: 'Nature Physics', year: 2010, href: 'https://www.nature.com/articles/nphys1746' }
+            },
+            'redundant': {
+                title: 'Redundant link removal',
+                blurb: 'Score every edge by how much new diffusion it offers; prune the low-importance ones, then run standard k-shell on the residual graph.',
+                formula: 'D_ij = (n_{i→j} + n_{j→i}) / 2\nremove edges with D_ij < 2',
+                cite: { authors: 'Liu, Tang, Zhou', venue: 'Sci. Reports', year: 2015, href: 'https://www.nature.com/articles/srep13172' }
+            },
+            'dk-gravity': {
+                title: 'Improved gravity model',
+                blurb: 'Refine each node\'s shell with its within-shell pruning stage, then sum DK·DK interactions within a shortest-path cutoff R.',
+                formula: 'k_s* = k_s + p_i / (Q + 1)\nDK   = deg + k_s*\nDKGM(i) = Σ_{d(i,j)≤R} DK(i)·DK(j) / d(i,j)²\nR    = max(2, round(⟨d⟩))',
+                cite: { authors: 'Li & Huang', venue: 'Sci. Reports', year: 2021, href: 'https://www.nature.com/articles/s41598-021-01218-1' }
+            },
+            'propagation-entropy': {
+                title: 'Node propagation entropy',
+                blurb: 'Combine clustering coefficient with first- and second-order neighbor counts into a local capacity cn, then aggregate neighbor entropies −I_j ln I_j.',
+                formula: 'cn(i) = (N(i) + N2(i)) / (1 + c_i)\nI_i  = cn(i) / Σ_j cn(j)\nPE(i) = − Σ_{j∈N(i)} I_j ln I_j',
+                cite: { authors: 'Yu, Zhou, Chen et al.', venue: 'Entropy', year: 2022, href: 'https://doi.org/10.3390/e24020275' }
+            },
+            'entropy-k-shell': {
+                title: 'Information entropy k-shell',
+                blurb: 'Refine k-shell with a sigmoid position index from peel iterations, add a second-order neighbor degree attribute, then entropy-weight the two.',
+                formula: 'p(i)   = 0.75 / (1 + e^{−iter(i)/√m})\nPNp(i) = ks(i) + Σ_{j∈Γ(i)} p(j)\nPNn(i) = Σ_{j∈Γ(i)} Σ_{l∈Γ(j)} k_l\nPN(i)  = w1·PNp + w2·PNn',
+                cite: { authors: 'Zhao, Bao, Chen', venue: 'Complexity', year: 2020, href: 'https://doi.org/10.1155/2020/5903798' }
+            }
+        };
+        
+        // Initialize D3 elements
+        const svg = d3.select('#graphSvg');
+        // Canvas dimensions track the actual rendered .canvas-wrap, so the
+        // simulation's gravity center sits at the visible center regardless of
+        // the container's size or aspect ratio. Updated by syncCanvasSize().
+        let width = 800;
+        let height = 600;
+
+        // Create containers for different elements
+        const linkContainer = svg.append('g').attr('class', 'links');
+        const nodeContainer = svg.append('g').attr('class', 'nodes');
+        const labelContainer = svg.append('g').attr('class', 'labels');
+
+        // Force simulation. The collision radius is a per-node function so we
+        // can shrink it to 0 for the actively-dragged node, letting the user
+        // drop one node on top of another to create an edge.
+        const NODE_RADIUS = 15;
+        const BOUNDARY_PAD = NODE_RADIUS + 4;
+        const simulation = d3.forceSimulation()
+            .force('link', d3.forceLink().id(d => d.id).distance(55))
+            .force('charge', d3.forceManyBody().strength(-130).distanceMax(280))
+            .force('center', d3.forceCenter(width / 2, height / 2))
+            // Soft pull toward center on each axis so disconnected components don't drift.
+            .force('x', d3.forceX().x(() => width / 2).strength(0.06))
+            .force('y', d3.forceY().y(() => height / 2).strength(0.06))
+            .force('collision', d3.forceCollide().radius(d => d === state.draggedNode ? 0 : 20));
+
+        function syncCanvasSize() {
+            const wrap = document.querySelector('.canvas-wrap');
+            if (!wrap) return;
+            const rect = wrap.getBoundingClientRect();
+            const w = Math.max(200, rect.width);
+            const h = Math.max(200, rect.height);
+            if (w === width && h === height) return;
+            width = w;
+            height = h;
+            simulation.force('center', d3.forceCenter(width / 2, height / 2));
+            simulation.alpha(0.2).restart();
+        }
+
+        if (typeof ResizeObserver !== 'undefined') {
+            const ro = new ResizeObserver(() => syncCanvasSize());
+            ro.observe(document.querySelector('.canvas-wrap'));
+        } else {
+            window.addEventListener('resize', syncCanvasSize);
+        }
+        // Run once after layout is ready in case ResizeObserver hasn't fired yet.
+        requestAnimationFrame(syncCanvasSize);
+        
+        // Event listeners
+        document.getElementById('exampleGraphs').addEventListener('change', loadExampleGraph);
+        document.getElementById('clearGraph').addEventListener('click', clearGraph);
+        document.getElementById('randomGraph').addEventListener('click', generateRandomGraph);
+        document.getElementById('importGraphBtn').addEventListener('click', () => {
+            document.getElementById('graphFileInput').click();
+        });
+        document.getElementById('graphFileInput').addEventListener('change', handleGraphFileImport);
+        document.getElementById('exportEdgelistBtn').addEventListener('click', () => exportCurrentGraph('txt'));
+        document.getElementById('exportJsonBtn').addEventListener('click', () => exportCurrentGraph('json'));
+        document.getElementById('algorithmSelect').addEventListener('change', updateAlgorithmInfo);
+        document.getElementById('runAlgorithm').addEventListener('click', runAlgorithm);
+        document.getElementById('playAnimation').addEventListener('click', playAnimation);
+        document.getElementById('stepAlgorithm').addEventListener('click', stepAlgorithm);
+        document.getElementById('animateAlgorithm').addEventListener('change', (e) => {
+            const on = e.target.checked;
+            document.getElementById('speedSlider').disabled = !on;
+            if (!on) document.getElementById('playAnimation').disabled = true;
+        });
+        document.getElementById('resetAnimation').addEventListener('click', resetAnimation);
+        document.getElementById('colorScheme').addEventListener('change', updateVisualization);
+        document.getElementById('layoutToggle').addEventListener('click', toggleLayout);
+        document.getElementById('themeToggle').addEventListener('click', toggleTheme);
+
+        // ESC closes the shell distribution plot modal, or cancels a pending edge gesture.
+        window.addEventListener('keydown', (e) => {
+            if (e.key !== 'Escape') return;
+            if (!document.getElementById('shellDistModal').hidden) {
+                closeShellDistModal();
+                return;
+            }
+            if (state.pendingEdgeSource) {
+                state.pendingEdgeSource = null;
+                updateNodeInfo();
+                updateVisualization();
+            }
+        });
+
+        // Theme: read persisted preference, fall back to system, default to dark.
+        (function applyInitialTheme() {
+            const stored = localStorage.getItem('kshell.theme');
+            const prefersLight = window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches;
+            const theme = stored || (prefersLight ? 'light' : 'dark');
+            setTheme(theme);
+        })();
+
+        function setTheme(theme) {
+            document.documentElement.setAttribute('data-theme', theme);
+            localStorage.setItem('kshell.theme', theme);
+            const label = document.querySelector('.theme-toggle__label');
+            if (label) label.textContent = theme === 'light' ? 'Dark' : 'Light';
+        }
+
+        function toggleTheme() {
+            const current = document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark';
+            setTheme(current === 'light' ? 'dark' : 'light');
+        }
+
+        // SVG event listeners
+        svg.on('click', handleSvgClick)
+           .on('contextmenu', handleSvgRightClick);
+        
+        // Initialize the application
+        init();
+        
+        function init() {
+            updateStats();
+            updateVisualization();
+            updateAlgorithmInfo();
+            updateExportButtons();
+        }
+        
+        function setImportStatus(message, type = '') {
+            const el = document.getElementById('importStatus');
+            if (!el) return;
+            el.textContent = message;
+            el.className = 'import-status' + (type ? ` import-status--${type}` : '');
+        }
+
+        function updateExportButtons() {
+            const hasGraph = state.nodes.length > 0;
+            document.getElementById('exportEdgelistBtn').disabled = !hasGraph;
+            document.getElementById('exportJsonBtn').disabled = !hasGraph;
+        }
+
+        function applyGraphTopology(nodes, edges, { layout = false } = {}) {
+            syncCanvasSize();
+            if (layout) layoutImportedNodes(nodes, width, height);
+            state.nodes = nodes;
+            state.edges = edges.map(e => ({...e, removed: false}));
+            state.nodeIdCounter = Math.max(...state.nodes.map(n => n.id)) + 1;
+            state.pendingEdgeSource = null;
+            state.selectedNode = null;
+            clearAlgorithmState();
+            calculateDegrees();
+            updateVisualization();
+            updateStats();
+            updateNodeInfo();
+            updateExportButtons();
+            hideWelcomeMessage();
+        }
+
+        function loadExampleGraph() {
+            const selectedExample = document.getElementById('exampleGraphs').value;
+            if (!selectedExample) return;
+
+            const example = exampleGraphs[selectedExample];
+            const nodes = example.nodes.map(n => ({...n, shell: null, degree: 0, removed: false}));
+            const edges = example.edges.map(e => ({...e}));
+            applyGraphTopology(nodes, edges);
+            setImportStatus(`Loaded example: ${selectedExample.replace(/_/g, ' ')}`, 'ok');
+        }
+
+        function handleGraphFileImport(event) {
+            const file = event.target.files && event.target.files[0];
+            event.target.value = '';
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = () => {
+                try {
+                    const parsed = parseGraphFile(reader.result, file.name);
+                    applyGraphTopology(parsed.nodes, parsed.edges, { layout: true });
+                    setImportStatus(
+                        `Imported ${file.name}: ${parsed.nodes.length} nodes, ${parsed.edges.length} edges`,
+                        'ok'
+                    );
+                    document.getElementById('exampleGraphs').value = '';
+                } catch (err) {
+                    setImportStatus(err.message || 'Import failed.', 'error');
+                }
+            };
+            reader.onerror = () => setImportStatus('Could not read file.', 'error');
+            reader.readAsText(file);
+        }
+
+        function exportCurrentGraph(format) {
+            if (state.nodes.length === 0) return;
+            const activeEdges = state.edges.filter(e => !e.removed);
+            if (format === 'json') {
+                downloadText(exportJson(state.nodes, activeEdges), 'graph.json', 'application/json');
+            } else {
+                downloadText(exportEdgeList(state.nodes, activeEdges), 'graph.edgelist.txt', 'text/plain');
+            }
+            setImportStatus(`Exported ${format === 'json' ? 'JSON' : 'edge list'}.`, 'ok');
+        }
+        
+        function clearGraph() {
+            state.nodes = [];
+            state.edges = [];
+            state.nodeIdCounter = 1;
+            state.pendingEdgeSource = null;
+            state.selectedNode = null;
+            resetAnimation();
+            updateNodeInfo();
+            updateVisualization();
+            updateStats();
+            updateExportButtons();
+            setImportStatus('');
+            document.getElementById('exampleGraphs').value = '';
+            showWelcomeMessage();
+        }
+        
+        function generateRandomGraph() {
+            const nodeCount = 8 + Math.floor(Math.random() * 7); // 8-15 nodes
+            state.nodes = [];
+            state.edges = [];
+            
+            // Generate nodes
+            for (let i = 1; i <= nodeCount; i++) {
+                state.nodes.push({
+                    id: i,
+                    x: 100 + Math.random() * (width - 200),
+                    y: 100 + Math.random() * (height - 200),
+                    shell: null,
+                    degree: 0,
+                    removed: false
+                });
+            }
+            
+            // Generate random edges (ensuring connectivity)
+            const edgeCount = nodeCount + Math.floor(Math.random() * nodeCount);
+            const edges = new Set();
+            
+            // Ensure connectivity by creating a spanning tree first
+            for (let i = 2; i <= nodeCount; i++) {
+                const target = Math.floor(Math.random() * (i - 1)) + 1;
+                edges.add(`${Math.min(target, i)}-${Math.max(target, i)}`);
+            }
+            
+            // Add additional random edges
+            while (edges.size < edgeCount) {
+                const source = Math.floor(Math.random() * nodeCount) + 1;
+                const target = Math.floor(Math.random() * nodeCount) + 1;
+                if (source !== target) {
+                    edges.add(`${Math.min(source, target)}-${Math.max(source, target)}`);
+                }
+            }
+            
+            // Convert to edge objects
+            state.edges = Array.from(edges).map(edge => {
+                const [source, target] = edge.split('-').map(Number);
+                return { source, target, removed: false };
+            });
+            
+            state.nodeIdCounter = nodeCount + 1;
+            state.pendingEdgeSource = null;
+            state.selectedNode = null;
+            applyGraphTopology(state.nodes, state.edges);
+        }
+
+        function handleSvgClick(event) {
+            if (event.defaultPrevented) return;
+
+            // Empty-space click cancels any pending edge gesture, then adds a new node.
+            state.pendingEdgeSource = null;
+
+            const [x, y] = d3.pointer(event);
+            state.nodes.push({
+                id: state.nodeIdCounter++,
+                x, y,
+                shell: null,
+                degree: 0,
+                removed: false
+            });
+            calculateDegrees();
+            updateVisualization();
+            updateStats();
+            updateExportButtons();
+            hideWelcomeMessage();
+        }
+
+        function handleSvgRightClick(event) {
+            event.preventDefault();
+        }
+
+        // Click-to-connect model:
+        //  · 1st click on node A → A becomes pending source (accent ring).
+        //  · 2nd click on node B → edge A-B created, pending cleared.
+        //  · 2nd click on A again → cancels pending.
+        function handleNodeClick(event, node) {
+            event.stopPropagation();
+
+            if (!state.pendingEdgeSource) {
+                state.pendingEdgeSource = node;
+                state.selectedNode = node;
+                updateNodeInfo();
+                updateVisualization();
+                return;
+            }
+
+            if (state.pendingEdgeSource.id === node.id) {
+                // Toggle off: same node tapped twice cancels the gesture.
+                state.pendingEdgeSource = null;
+                updateNodeInfo();
+                updateVisualization();
+                return;
+            }
+
+            const source = state.pendingEdgeSource;
+            const exists = state.edges.some(e =>
+                (e.source === source.id && e.target === node.id) ||
+                (e.source === node.id && e.target === source.id)
+            );
+            if (!exists) {
+                state.edges.push({ source: source.id, target: node.id, removed: false });
+                calculateDegrees();
+                updateStats();
+            }
+            state.pendingEdgeSource = null;
+            state.selectedNode = node;
+            updateNodeInfo();
+            updateVisualization();
+        }
+        
+        function handleNodeRightClick(event, node) {
+            event.preventDefault();
+            event.stopPropagation();
+
+            // Remove node and all connected edges
+            state.nodes = state.nodes.filter(n => n.id !== node.id);
+            state.edges = state.edges.filter(e => e.source !== node.id && e.target !== node.id);
+            if (state.pendingEdgeSource && state.pendingEdgeSource.id === node.id) {
+                state.pendingEdgeSource = null;
+            }
+            if (state.selectedNode && state.selectedNode.id === node.id) {
+                state.selectedNode = null;
+                updateNodeInfo();
+            }
+
+            calculateDegrees();
+            updateVisualization();
+            updateStats();
+
+            if (state.nodes.length === 0) {
+                showWelcomeMessage();
+            }
+        }
+        
+        // Drag is purely a reposition gesture. Edge creation is handled by
+        // click-to-connect (see handleNodeClick).
+        function handleNodeDragStart(event, node) {
+            if (!event.active) simulation.alphaTarget(0.3).restart();
+            node.fx = node.x;
+            node.fy = node.y;
+            state.draggedNode = node;
+        }
+
+        function handleNodeDrag(event, node) {
+            node.fx = event.x;
+            node.fy = event.y;
+        }
+
+        function handleNodeDragEnd(event, node) {
+            if (!event.active) simulation.alphaTarget(0);
+            if (state.layout === 'force') {
+                node.fx = null;
+                node.fy = null;
+            } else {
+                node.x = event.x;
+                node.y = event.y;
+            }
+            state.draggedNode = null;
+        }
+        
+        function handleEdgeRightClick(event, edge) {
+            event.preventDefault();
+            event.stopPropagation();
+            
+            // Remove edge
+            state.edges = state.edges.filter(e => e !== edge);
+            calculateDegrees();
+            updateVisualization();
+            updateStats();
+        }
+        
+        function calculateDegrees() {
+            // Reset degrees
+            state.nodes.forEach(n => n.degree = 0);
+            
+            // Count degrees
+            state.edges.forEach(e => {
+                const sourceNode = state.nodes.find(n => n.id === e.source);
+                const targetNode = state.nodes.find(n => n.id === e.target);
+                if (sourceNode && !sourceNode.removed) sourceNode.degree++;
+                if (targetNode && !targetNode.removed) targetNode.degree++;
+            });
+        }
+        
+        function updateVisualization() {
+            // Update simulation
+            simulation.nodes(state.nodes);
+            const edgeLinks = state.edges.filter(e => !e.removed).map(e => ({
+                ...e,
+                source: state.nodes.find(n => n.id === e.source),
+                target: state.nodes.find(n => n.id === e.target)
+            })).filter(e => e.source && e.target);
+
+            simulation.force("link").links(edgeLinks);
+
+            // Update links
+            const links = linkContainer.selectAll('.link')
+                .data(edgeLinks, d => `${d.source.id}-${d.target.id}`);
+
+            
+            links.exit().remove();
+            
+            const linksEnter = links.enter()
+                .append('line')
+                .attr('class', 'link')
+                .on('contextmenu', handleEdgeRightClick);
+            
+            links.merge(linksEnter)
+                .attr('stroke', d => d.removed ? 'var(--danger)' : 'var(--border-strong)')
+                .attr('stroke-width', d => d.removed ? 1 : 1.5)
+                .attr('stroke-opacity', d => d.removed ? 0.4 : 0.7)
+                .attr('stroke-dasharray', d => d.removed ? '4,4' : 'none');
+
+            // Update nodes
+            const nodes = nodeContainer.selectAll('.node')
+                .data(state.nodes.filter(n => !n.removed), d => d.id);
+            
+            nodes.exit().remove();
+            
+            const nodesEnter = nodes.enter()
+                .append('circle')
+                .attr('class', 'node')
+                .attr('r', 15)
+                .on('click', handleNodeClick)
+                .on('contextmenu', handleNodeRightClick)
+                .call(d3.drag()
+                    .on('start', handleNodeDragStart)
+                    .on('drag', handleNodeDrag)
+                    .on('end', handleNodeDragEnd));
+            
+            const nodesMerged = nodes.merge(nodesEnter);
+            
+            const isPending = d => state.pendingEdgeSource && state.pendingEdgeSource.id === d.id;
+            nodesMerged
+                .attr('fill', d => shellColor(d.shell))
+                .attr('stroke', d => shellStroke(d))
+                .attr('stroke-width', d => {
+                    if (isPending(d)) return 3;
+                    if (d === state.selectedNode) return 2.5;
+                    if (d.shell === null || d.shell === undefined) return 1.5;
+                    return 1.25;
+                })
+                .attr('opacity', d => d.removed ? 0.3 : 1)
+                .classed('node--pending', isPending);
+            
+            // Update labels
+            const labels = labelContainer.selectAll('.node-label')
+                .data(state.nodes.filter(n => !n.removed), d => d.id);
+            
+            labels.exit().remove();
+            
+            const labelsEnter = labels.enter()
+                .append('text')
+                .attr('class', 'node-label');
+            
+            labels.merge(labelsEnter)
+                .text(d => d.id)
+                .attr('fill', d => (d.shell === null || d.shell === undefined) ? 'var(--text)' : '#0a0b0d')
+                .attr('opacity', d => d.removed ? 0.3 : 1);
+            
+            // Apply layout
+            if (state.layout === 'shell' && state.animationResults) {
+                applyShellLayout();
+            } else {
+                simulation.alpha(1).restart();
+            }
+            
+            // Update positions on tick
+            simulation.on('tick', () => {
+                // Hard-clamp positions so nodes can't be flung outside the canvas
+                // by the simulation. Pinned nodes (fx/fy set) are clamped via fx/fy.
+                state.nodes.forEach(n => {
+                    if (n.removed) return;
+                    const minX = BOUNDARY_PAD, maxX = width - BOUNDARY_PAD;
+                    const minY = BOUNDARY_PAD, maxY = height - BOUNDARY_PAD;
+                    n.x = Math.max(minX, Math.min(maxX, n.x));
+                    n.y = Math.max(minY, Math.min(maxY, n.y));
+                    if (n.fx != null) n.fx = Math.max(minX, Math.min(maxX, n.fx));
+                    if (n.fy != null) n.fy = Math.max(minY, Math.min(maxY, n.fy));
+                });
+
+                linkContainer.selectAll('.link')
+                    .attr('x1', d => d.source.x)
+                    .attr('y1', d => d.source.y)
+                    .attr('x2', d => d.target.x)
+                    .attr('y2', d => d.target.y);
+
+                nodeContainer.selectAll('circle')
+                    .attr('cx', d => d.x)
+                    .attr('cy', d => d.y);
+
+                labelContainer.selectAll('text')
+                    .attr('x', d => d.x)
+                    .attr('y', d => d.y);
+            });
+        }
+        
+        function applyShellLayout() {
+            if (!state.animationResults) return;
+
+            // Group nodes by shell, treating null/undefined as the lowest tier.
+            const shells = {};
+            state.nodes.forEach(node => {
+                const shell = node.shell ?? -1;
+                (shells[shell] = shells[shell] || []).push(node);
+            });
+
+            const shellKeys = Object.keys(shells).map(Number);
+            if (shellKeys.length === 0) return;
+            const maxShell = Math.max(...shellKeys);
+            const minShell = Math.min(...shellKeys);
+            const shellSpan = Math.max(1, maxShell - minShell);
+
+            const centerX = width / 2;
+            const centerY = height / 2;
+            const maxRadius = Math.min(width, height) / 3;
+
+            shellKeys.forEach(shell => {
+                const radius = ((maxShell - shell) / shellSpan) * maxRadius;
+                const nodesInShell = shells[shell];
+                nodesInShell.forEach((node, i) => {
+                    const angle = (i / nodesInShell.length) * 2 * Math.PI;
+                    node.x = centerX + radius * Math.cos(angle);
+                    node.y = centerY + radius * Math.sin(angle);
+                    node.fx = node.x;
+                    node.fy = node.y;
+                });
+            });
+        }
+        
+        function updateStats() {
+            const activeNodes = state.nodes.filter(n => !n.removed);
+            const activeEdges = state.edges.filter(e => !e.removed);
+            
+            document.getElementById('nodeCount').textContent = activeNodes.length;
+            document.getElementById('edgeCount').textContent = activeEdges.length;
+            
+            if (activeNodes.length > 0) {
+                const totalDegree = activeNodes.reduce((sum, n) => sum + n.degree, 0);
+                const avgDegree = (totalDegree / activeNodes.length).toFixed(2);
+                const maxDegree = Math.max(...activeNodes.map(n => n.degree));
+                
+                document.getElementById('avgDegree').textContent = avgDegree;
+                document.getElementById('maxDegree').textContent = maxDegree;
+            } else {
+                document.getElementById('avgDegree').textContent = '0';
+                document.getElementById('maxDegree').textContent = '0';
+            }
+        }
+        
+        function updateAlgorithmInfo() {
+            const algorithm = document.getElementById('algorithmSelect').value;
+            const info = document.getElementById('algorithmInfo');
+            const meta = algorithmDescriptions[algorithm];
+            if (!meta) { info.innerHTML = ''; return; }
+            info.innerHTML = `
+                <div class="algorithm-info__title">${meta.title}</div>
+                <div>${meta.blurb}</div>
+                <pre class="algorithm-info__formula">${meta.formula}</pre>
+                <div class="algorithm-info__cite">
+                    <a href="${meta.cite.href}" target="_blank" rel="noopener">${meta.cite.authors}</a>
+                    · ${meta.cite.venue} · ${meta.cite.year}
+                </div>
+            `;
+        }
+        
+        function updateNodeInfo() {
+            const infoContainer = document.getElementById('nodeInfo');
+
+            if (!state.selectedNode) {
+                infoContainer.innerHTML = '<p class="color-text-secondary">Click a node to see details.</p>';
+                return;
+            }
+
+            const node = state.selectedNode;
+            const neighbors = getNodeNeighbors(node.id);
+            const results = state.animationResults;
+
+            const rows = [
+                ['Degree', node.degree],
+                ['Neighbors', neighbors.join(', ') || '—'],
+            ];
+            if (node.shell !== null && node.shell !== undefined) rows.push(['k-shell', node.shell]);
+
+            const gravity = results && results.improvedKShell && results.improvedKShell[node.id];
+            if (gravity) {
+                rows.push(['Stage p_i', gravity.stage]);
+                rows.push(['q_k (this shell)', gravity.qK]);
+                rows.push(['Q (global max)', gravity.qMax]);
+                rows.push(['k_s*', gravity.improvedShell.toFixed(4)]);
+                rows.push(['DK', gravity.dkValue.toFixed(3)]);
+                rows.push(['DKGM', (gravity.dkgm ?? gravity.gravity ?? 0).toFixed(2)]);
+            }
+
+            const pe = results && results.propagationEntropy && results.propagationEntropy[node.id];
+            if (pe) {
+                rows.push(['Clustering c', pe.clustering.toFixed(4)]);
+                rows.push(['N(i)', pe.firstOrder]);
+                rows.push(['N2(i)', pe.secondOrder]);
+                rows.push(['cn', pe.cn.toFixed(4)]);
+                rows.push(['PE', pe.pe.toFixed(4)]);
+            }
+
+            const ieks = results && results.entropyKShell && results.entropyKShell[node.id];
+            if (ieks) {
+                rows.push(['iter', ieks.iter]);
+                rows.push(['p(i)', ieks.positionIndex.toFixed(4)]);
+                rows.push(['PNp', ieks.pnp.toFixed(4)]);
+                rows.push(['PNn', ieks.pnn.toFixed(4)]);
+                rows.push(['PN', ieks.pn.toFixed(4)]);
+            }
+
+            const isPending = state.pendingEdgeSource && state.pendingEdgeSource.id === node.id;
+            const hint = isPending
+                ? '<div class="pending-hint">Click another node to connect, this node again to cancel, or press <kbd>Esc</kbd>.</div>'
+                : '';
+
+            infoContainer.innerHTML = `
+                <div class="flex justify-between items-center mb-8">
+                    <strong style="font-family: var(--font-display); font-style: italic; font-size: 18px;">Node ${node.id}</strong>
+                    ${node.shell !== null && node.shell !== undefined ? `<span class="status status--info">k = ${node.shell}</span>` : ''}
+                </div>
+                ${hint}
+                ${rows.map(([k, v]) => `<div class="kv"><span class="kv__key">${k}</span><span class="kv__val">${v}</span></div>`).join('')}
+            `;
+        }
+        
+        function getNodeNeighbors(nodeId) {
+            const neighbors = [];
+            state.edges.forEach(edge => {
+                if (!edge.removed) {
+                    if (edge.source === nodeId) neighbors.push(edge.target);
+                    if (edge.target === nodeId) neighbors.push(edge.source);
+                }
+            });
+            return neighbors;
+        }
+        
+        function showWelcomeMessage() {
+            document.getElementById('welcomeMessage').style.display = '';
+        }
+
+        function hideWelcomeMessage() {
+            document.getElementById('welcomeMessage').style.display = 'none';
+        }
+        
+        function toggleLayout() {
+            state.layout = state.layout === 'force' ? 'shell' : 'force';
+            
+            if (state.layout === 'force') {
+                // Release fixed positions
+                state.nodes.forEach(node => {
+                    node.fx = null;
+                    node.fy = null;
+                });
+                simulation.alpha(1).restart();
+            } else if (state.animationResults) {
+                applyShellLayout();
+            }
+            
+            document.getElementById('layoutToggle').innerHTML =
+                state.layout === 'force'
+                    ? '<span aria-hidden="true">↻</span> Shell Layout'
+                    : '<span aria-hidden="true">↻</span> Force Layout';
+        }
+        
+        // Algorithm implementations
+        function runAlgorithm() {
+            if (state.nodes.length === 0) {
+                alert('Please create a graph first!');
+                return;
+            }
+
+            // Make Run idempotent: clear any previous run's state on the same graph
+            // so the user can switch algorithms or re-run without hitting Reset first.
+            clearAlgorithmState();
+            calculateDegrees();
+
+            const algorithm = document.getElementById('algorithmSelect').value;
+            const runners = {
+                'standard': standardKShellDecomposition,
+                'redundant': redundantLinkRemovalKShell,
+                'dk-gravity': dkGravityModelKShell,
+                'propagation-entropy': nodePropagationEntropyKShell,
+                'entropy-k-shell': informationEntropyKShell,
+            };
+            const runner = runners[algorithm] || standardKShellDecomposition;
+            state.animationResults = runner(state.nodes, state.edges);
+            state.currentStep = 0;
+            hideWelcomeMessage();
+
+            document.getElementById('resetAnimation').disabled = false;
+
+            const animate = document.getElementById('animateAlgorithm').checked;
+            if (animate) {
+                state.isAnimating = false;
+                document.getElementById('runAlgorithm').disabled = true;
+                document.getElementById('playAnimation').disabled = false;
+                document.getElementById('stepAlgorithm').disabled = false;
+                updateVisualization();
+                updateResults();
+                updateOverlay(state.animationResults);
+            } else {
+                skipAnimationToEnd();
+            }
+        }
+
+        function playAnimation() {
+            if (!state.animationResults || state.currentStep >= state.animationResults.steps.length) {
+                completeAnimation();
+                return;
+            }
+            state.isAnimating = true;
+            document.getElementById('playAnimation').disabled = true;
+            document.getElementById('stepAlgorithm').disabled = false;
+            animateAlgorithm();
+        }
+
+        function skipAnimationToEnd() {
+            state.isAnimating = false;
+            document.getElementById('runAlgorithm').disabled = true;
+            document.getElementById('playAnimation').disabled = true;
+            document.getElementById('stepAlgorithm').disabled = true;
+            while (state.animationResults && state.currentStep < state.animationResults.steps.length) {
+                applyAnimationStep(state.animationResults.steps[state.currentStep]);
+                state.currentStep++;
+            }
+            completeAnimation();
+        }
+        
+        // K-shell algorithms (standard, redundant-link removal, improved gravity model)
+        // live in algorithms.js as pure functions. See that file for paper references.
+
+        function applyAnimationStep(step) {
+            if (step.type === 'remove_node') {
+                const node = state.nodes.find(n => n.id === step.nodeId);
+                if (node) {
+                    node.shell = step.shell;
+                    node.removed = true;
+                }
+            } else if (step.type === 'remove_edge') {
+                const edge = state.edges.find(e =>
+                    (e.source === step.source && e.target === step.target) ||
+                    (e.source === step.target && e.target === step.source)
+                );
+                if (edge) edge.removed = true;
+            }
+        }
+
+        function advanceAnimation() {
+            const step = state.animationResults.steps[state.currentStep];
+            applyAnimationStep(step);
+            state.currentStep++;
+            updateVisualization();
+            updateResults();
+            const progress = (state.currentStep / state.animationResults.steps.length) * 100;
+            document.getElementById('progressFill').style.width = `${progress}%`;
+        }
+
+        function animateAlgorithm() {
+            if (!state.animationResults || state.currentStep >= state.animationResults.steps.length) {
+                completeAnimation();
+                return;
+            }
+            const speed = parseFloat(document.getElementById('speedSlider').value);
+            advanceAnimation();
+            setTimeout(() => {
+                if (state.isAnimating) animateAlgorithm();
+            }, 1000 / speed);
+        }
+
+        function stepAlgorithm() {
+            if (!state.animationResults || state.currentStep >= state.animationResults.steps.length) {
+                completeAnimation();
+                return;
+            }
+            state.isAnimating = false;
+            document.getElementById('playAnimation').disabled = false;
+            advanceAnimation();
+            if (state.currentStep >= state.animationResults.steps.length) {
+                completeAnimation();
+            }
+        }
+        
+        function completeAnimation() {
+            state.isAnimating = false;
+
+            // Ensure all nodes have their final shell assignments
+            state.nodes.forEach(node => {
+                if (state.animationResults.shellAssignments[node.id] !== undefined) {
+                    node.shell = state.animationResults.shellAssignments[node.id];
+                    node.removed = false; // Show all nodes in final result
+                }
+            });
+
+            updateVisualization();
+            updateResults();
+
+            // Re-enable Run so the user can switch algorithm or re-run on the same graph.
+            document.getElementById('runAlgorithm').disabled = false;
+            document.getElementById('playAnimation').disabled = true;
+            document.getElementById('stepAlgorithm').disabled = true;
+            document.getElementById('progressFill').style.width = '100%';
+        }
+        
+        // Clear all algorithm-derived state on the current graph (shells, removed flags,
+        // animation cursor, results panel). Does NOT touch graph topology — safe to call
+        // when reusing the same graph for a different algorithm.
+        function clearAlgorithmState() {
+            state.isAnimating = false;
+            state.currentStep = 0;
+            state.animationResults = null;
+
+            state.nodes.forEach(node => {
+                node.shell = null;
+                node.removed = false;
+            });
+            state.edges.forEach(edge => {
+                edge.removed = false;
+            });
+
+            document.getElementById('runAlgorithm').disabled = false;
+            document.getElementById('playAnimation').disabled = true;
+            document.getElementById('stepAlgorithm').disabled = true;
+            document.getElementById('resetAnimation').disabled = true;
+            document.getElementById('progressFill').style.width = '0%';
+            document.getElementById('resultsContainer').innerHTML =
+                '<p class="color-text-secondary">Run an algorithm to see results.</p>';
+            document.getElementById('shellDistActions').style.display = 'none';
+            closeShellDistModal();
+            state.shellCounts = null;
+            updateOverlay(null);
+        }
+
+        function resetAnimation() {
+            clearAlgorithmState();
+            calculateDegrees();
+            updateVisualization();
+            updateStats();
+        }
+        
+        function updateResults() {
+            if (!state.animationResults) return;
+
+            const container = document.getElementById('resultsContainer');
+            const results = state.animationResults;
+            updateOverlay(results);
+
+            const isGravity = !!results.improvedKShell;
+            const isRedundant = results.removedEdges !== undefined;
+            const isPropagationEntropy = !!results.propagationEntropy;
+            const isEntropyKShell = !!results.entropyKShell;
+
+            const nodeCount = state.nodes.length;
+            const canCollapse = nodeCount > RESULTS_PREVIEW_ROWS;
+            const tableExpanded = !canCollapse || state.resultsTableExpanded;
+            const tableWrapClass = tableExpanded ? 'is-expanded' : 'is-collapsed';
+
+            let html = `
+                <div class="mb-16" style="display:flex; justify-content:space-between; align-items:baseline; gap:var(--space-3); flex-wrap: wrap;">
+                    <span style="font-family: var(--font-display); font-style: italic; font-size: 16px;">${results.algorithm}</span>
+                    <span class="kv__key">max k = <span class="kv__val">${results.maxShell}</span></span>
+                    ${isGravity && results.truncationRadius !== undefined
+                        ? `<span class="kv__key">R = <span class="kv__val">${results.truncationRadius}</span></span>`
+                        : ''}
+                    ${isRedundant
+                        ? `<span class="kv__key">pruned = <span class="kv__val">${results.removedEdges.length}</span></span>`
+                        : ''}
+                    ${isEntropyKShell && results.entropyWeights
+                        ? `<span class="kv__key">w1/w2 = <span class="kv__val">${results.entropyWeights.w1.toFixed(3)} / ${results.entropyWeights.w2.toFixed(3)}</span></span>`
+                        : ''}
+                </div>
+                <div class="results-nodes-section">
+                    <div class="results-table-toolbar">
+                        <h5 class="mb-0">Nodes</h5>
+                        <div class="results-table-toolbar__actions">
+                            ${canCollapse ? `
+                                <button type="button" id="resultsTableToggle" class="btn btn--outline btn--sm">
+                                    ${tableExpanded ? 'Show less' : `Show all ${nodeCount} nodes`}
+                                </button>
+                            ` : ''}
+                            <button type="button" id="downloadResultsCsv" class="btn btn--outline btn--sm">Download CSV</button>
+                        </div>
+                    </div>
+                    <div id="resultsTableWrap" class="results-table-wrap ${tableWrapClass}">
+                        <table class="results-table">
+                            <thead>
+                                <tr>
+                                    <th>Node</th>
+                                    <th>deg</th>
+                                    <th>k</th>
+                                    ${isGravity ? '<th>k_s*</th><th>DK</th><th>DKGM</th>' : ''}
+                                    ${isPropagationEntropy ? '<th>cn</th><th>PE</th>' : ''}
+                                    ${isEntropyKShell ? '<th>p(i)</th><th>PNp</th><th>PNn</th><th>PN</th>' : ''}
+                                    ${isRedundant ? '<th>k_s (orig)</th>' : ''}
+                                </tr>
+                            </thead>
+                            <tbody>
+            `;
+
+            state.nodes.forEach(node => {
+                const shell = node.shell !== null && node.shell !== undefined
+                    ? node.shell
+                    : (results.shellAssignments[node.id] !== undefined ? results.shellAssignments[node.id] : 'N/A');
+                const gravityInfo = results.improvedKShell && results.improvedKShell[node.id];
+                const peInfo = results.propagationEntropy && results.propagationEntropy[node.id];
+                const ieksInfo = results.entropyKShell && results.entropyKShell[node.id];
+
+                let extra = '';
+                if (results.improvedKShell) {
+                    extra = gravityInfo
+                        ? `<td>${gravityInfo.improvedShell.toFixed(4)}</td><td>${gravityInfo.dkValue.toFixed(3)}</td><td>${(gravityInfo.dkgm ?? gravityInfo.gravity ?? 0).toFixed(2)}</td>`
+                        : '<td>N/A</td><td>N/A</td><td>N/A</td>';
+                }
+                if (isPropagationEntropy) {
+                    extra += peInfo
+                        ? `<td>${peInfo.cn.toFixed(4)}</td><td>${peInfo.pe.toFixed(4)}</td>`
+                        : '<td>N/A</td><td>N/A</td>';
+                }
+                if (isEntropyKShell) {
+                    extra += ieksInfo
+                        ? `<td>${ieksInfo.positionIndex.toFixed(4)}</td><td>${ieksInfo.pnp.toFixed(4)}</td><td>${ieksInfo.pnn.toFixed(4)}</td><td>${ieksInfo.pn.toFixed(4)}</td>`
+                        : '<td>N/A</td><td>N/A</td><td>N/A</td><td>N/A</td>';
+                }
+                if (isRedundant) {
+                    const orig = results.originalShellAssignments
+                        ? results.originalShellAssignments[node.id]
+                        : 'N/A';
+                    extra += `<td>${orig !== undefined && orig !== null ? orig : 'N/A'}</td>`;
+                }
+
+                html += `
+                    <tr>
+                        <td>Node ${node.id}</td>
+                        <td>${node.degree}</td>
+                        <td>${shell}</td>
+                        ${extra}
+                    </tr>
+                `;
+            });
+            
+            html += '</tbody></table></div></div>';
+
+            const shellCounts = getShellCounts(results);
+            state.shellCounts = shellCounts;
+            const shells = Object.keys(shellCounts).sort((a, b) => parseInt(a) - parseInt(b));
+
+            if (shells.length > 0) {
+                const selectedShell = shells.includes(state.selectedShellDist)
+                    ? state.selectedShellDist
+                    : shells[0];
+                state.selectedShellDist = selectedShell;
+
+                html += `
+                    <div class="mt-16 shell-dist-select-row">
+                        <h5 class="mb-8">Shell Distribution</h5>
+                        <select id="shellDistSelect" class="form-control" aria-label="Select k-shell value">
+                            ${shells.map(shell => `
+                                <option value="${shell}"${String(shell) === String(selectedShell) ? ' selected' : ''}>
+                                    k = ${shell}
+                                </option>
+                            `).join('')}
+                        </select>
+                        <div class="kv">
+                            <span class="kv__key">k = <span id="shellDistK">${selectedShell}</span></span>
+                            <span class="kv__val" id="shellDistCount">${shellCounts[selectedShell]}</span>
+                        </div>
+                    </div>
+                `;
+            }
+
+            container.innerHTML = html;
+
+            const selectEl = document.getElementById('shellDistSelect');
+            if (selectEl) {
+                selectEl.addEventListener('change', () => {
+                    const shell = selectEl.value;
+                    state.selectedShellDist = shell;
+                    document.getElementById('shellDistK').textContent = shell;
+                    document.getElementById('shellDistCount').textContent = shellCounts[shell];
+                });
+            }
+
+            const toggleBtn = document.getElementById('resultsTableToggle');
+            if (toggleBtn) {
+                toggleBtn.addEventListener('click', () => {
+                    state.resultsTableExpanded = !state.resultsTableExpanded;
+                    updateResults();
+                });
+            }
+
+            const csvBtn = document.getElementById('downloadResultsCsv');
+            if (csvBtn) {
+                csvBtn.addEventListener('click', downloadResultsCsv);
+            }
+
+            updateShellDistActions();
+        }
+
+        function csvEscape(value) {
+            const text = value === null || value === undefined ? '' : String(value);
+            return /[",\n\r]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+        }
+
+        function downloadResultsCsv() {
+            if (!state.animationResults) return;
+
+            const results = state.animationResults;
+            const isGravity = !!results.improvedKShell;
+            const isRedundant = results.removedEdges !== undefined;
+            const isPropagationEntropy = !!results.propagationEntropy;
+            const isEntropyKShell = !!results.entropyKShell;
+
+            const headers = ['node_id', 'degree', 'k'];
+            if (isGravity) headers.push('k_s_star', 'DK', 'DKGM');
+            if (isPropagationEntropy) headers.push('cn', 'PE');
+            if (isEntropyKShell) headers.push('position_index', 'PNp', 'PNn', 'PN');
+            if (isRedundant) headers.push('k_orig');
+
+            const rows = state.nodes.map(node => {
+                const shell = node.shell !== null && node.shell !== undefined
+                    ? node.shell
+                    : (results.shellAssignments[node.id] !== undefined ? results.shellAssignments[node.id] : '');
+                const gravityInfo = results.improvedKShell && results.improvedKShell[node.id];
+                const peInfo = results.propagationEntropy && results.propagationEntropy[node.id];
+                const ieksInfo = results.entropyKShell && results.entropyKShell[node.id];
+                const row = [node.id, node.degree, shell];
+
+                if (isGravity) {
+                    row.push(
+                        gravityInfo ? gravityInfo.improvedShell.toFixed(4) : '',
+                        gravityInfo ? gravityInfo.dkValue.toFixed(3) : '',
+                        gravityInfo ? (gravityInfo.dkgm ?? gravityInfo.gravity ?? 0).toFixed(2) : ''
+                    );
+                }
+                if (isPropagationEntropy) {
+                    row.push(
+                        peInfo ? peInfo.cn.toFixed(4) : '',
+                        peInfo ? peInfo.pe.toFixed(4) : ''
+                    );
+                }
+                if (isEntropyKShell) {
+                    row.push(
+                        ieksInfo ? ieksInfo.positionIndex.toFixed(4) : '',
+                        ieksInfo ? ieksInfo.pnp.toFixed(4) : '',
+                        ieksInfo ? ieksInfo.pnn.toFixed(4) : '',
+                        ieksInfo ? ieksInfo.pn.toFixed(4) : ''
+                    );
+                }
+                if (isRedundant) {
+                    const orig = results.originalShellAssignments
+                        ? results.originalShellAssignments[node.id]
+                        : '';
+                    row.push(orig !== undefined && orig !== null ? orig : '');
+                }
+                return row;
+            });
+
+            const lines = [
+                headers.join(','),
+                ...rows.map(row => row.map(csvEscape).join(',')),
+            ];
+            const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
+            const slug = results.algorithm.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+            const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(blob);
+            link.download = `kshell-${slug || 'results'}-${stamp}.csv`;
+            link.click();
+            URL.revokeObjectURL(link.href);
+        }
+
+        function getShellCounts(results) {
+            const shellCounts = {};
+            Object.values(results.shellAssignments).forEach(shell => {
+                if (shell !== null && shell !== undefined) {
+                    shellCounts[shell] = (shellCounts[shell] || 0) + 1;
+                }
+            });
+            return shellCounts;
+        }
+
+        function updateOverlay(results) {
+            const algoEl = document.getElementById('overlayAlgo');
+            const stepEl = document.getElementById('overlayStep');
+            if (!algoEl || !stepEl) return;
+            if (!results) {
+                algoEl.textContent = '—';
+                stepEl.textContent = '0 / 0';
+                return;
+            }
+            algoEl.textContent = results.algorithm.toLowerCase().replace(/\s+/g, '_');
+            const total = results.steps ? results.steps.length : 0;
+            const cur = Math.min(state.currentStep, total);
+            stepEl.textContent = `${cur} / ${total}`;
+        }
+        
+        function updateShellDistActions() {
+            const actions = document.getElementById('shellDistActions');
+            if (!state.animationResults || !state.shellCounts || !Object.keys(state.shellCounts).length) {
+                actions.style.display = 'none';
+                return;
+            }
+            actions.style.display = '';
+        }
+
+        function openShellDistModal() {
+            if (!state.shellCounts || !Object.keys(state.shellCounts).length) return;
+            document.getElementById('shellDistModal').hidden = false;
+            renderShellDistPlot(state.shellCounts);
+        }
+
+        function closeShellDistModal() {
+            document.getElementById('shellDistModal').hidden = true;
+            document.getElementById('shellDistPlot').innerHTML = '';
+        }
+
+        function renderShellDistPlot(shellCounts) {
+            const container = document.getElementById('shellDistPlot');
+            container.innerHTML = '';
+
+            const data = Object.keys(shellCounts)
+                .map(k => ({ k: +k, count: shellCounts[k] }))
+                .sort((a, b) => a.k - b.k);
+
+            const width = 500;
+            const height = 280;
+            const margin = { top: 16, right: 16, bottom: 44, left: 48 };
+            const innerW = width - margin.left - margin.right;
+            const innerH = height - margin.top - margin.bottom;
+
+            const rootStyles = getComputedStyle(document.documentElement);
+            const textMuted = rootStyles.getPropertyValue('--text-muted').trim();
+            const borderColor = rootStyles.getPropertyValue('--border-strong').trim();
+
+            const svg = d3.select(container)
+                .append('svg')
+                .attr('width', width)
+                .attr('height', height)
+                .attr('viewBox', `0 0 ${width} ${height}`)
+                .attr('role', 'img')
+                .attr('aria-label', 'Bar chart of node count per k-shell value');
+
+            const g = svg.append('g')
+                .attr('transform', `translate(${margin.left},${margin.top})`);
+
+            const x = d3.scaleBand()
+                .domain(data.map(d => d.k))
+                .range([0, innerW])
+                .padding(0.2);
+
+            const y = d3.scaleLinear()
+                .domain([0, d3.max(data, d => d.count)])
+                .nice()
+                .range([innerH, 0]);
+
+            g.append('g')
+                .attr('transform', `translate(0,${innerH})`)
+                .call(d3.axisBottom(x).tickFormat(d => d))
+                .call(axis => axis.select('.domain').attr('stroke', borderColor))
+                .call(axis => axis.selectAll('.tick line').attr('stroke', borderColor))
+                .call(axis => axis.selectAll('.tick text').attr('fill', textMuted).attr('font-family', 'var(--font-mono)').attr('font-size', '10px'));
+
+            g.append('g')
+                .call(d3.axisLeft(y).ticks(Math.min(6, d3.max(data, d => d.count) + 1)))
+                .call(axis => axis.select('.domain').attr('stroke', borderColor))
+                .call(axis => axis.selectAll('.tick line').attr('stroke', borderColor))
+                .call(axis => axis.selectAll('.tick text').attr('fill', textMuted).attr('font-family', 'var(--font-mono)').attr('font-size', '10px'));
+
+            g.selectAll('.bar')
+                .data(data)
+                .join('rect')
+                .attr('class', 'bar')
+                .attr('x', d => x(d.k))
+                .attr('y', d => y(d.count))
+                .attr('width', x.bandwidth())
+                .attr('height', d => innerH - y(d.count))
+                .attr('fill', d => shellColor(d.k));
+
+            g.append('text')
+                .attr('x', innerW / 2)
+                .attr('y', innerH + 36)
+                .attr('text-anchor', 'middle')
+                .attr('fill', textMuted)
+                .attr('font-family', 'var(--font-mono)')
+                .attr('font-size', '10px')
+                .attr('letter-spacing', '0.14em')
+                .text('k');
+
+            g.append('text')
+                .attr('transform', 'rotate(-90)')
+                .attr('x', -innerH / 2)
+                .attr('y', -36)
+                .attr('text-anchor', 'middle')
+                .attr('fill', textMuted)
+                .attr('font-family', 'var(--font-mono)')
+                .attr('font-size', '10px')
+                .attr('letter-spacing', '0.14em')
+                .text('Nodes');
+        }
+
+        function saveShellDistPlotImage() {
+            const svgEl = document.querySelector('#shellDistPlot svg');
+            if (!svgEl) return;
+
+            const width = Number(svgEl.getAttribute('width')) || 500;
+            const height = Number(svgEl.getAttribute('height')) || 280;
+            const rootStyles = getComputedStyle(document.documentElement);
+            const bg = rootStyles.getPropertyValue('--bg-elev').trim();
+
+            const clone = svgEl.cloneNode(true);
+            clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+            clone.setAttribute('width', width);
+            clone.setAttribute('height', height);
+
+            const bgRect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+            bgRect.setAttribute('width', width);
+            bgRect.setAttribute('height', height);
+            bgRect.setAttribute('fill', bg);
+            clone.insertBefore(bgRect, clone.firstChild);
+
+            clone.querySelectorAll('text').forEach(el => {
+                el.setAttribute('font-family', 'JetBrains Mono, IBM Plex Mono, monospace');
+            });
+
+            const svgString = new XMLSerializer().serializeToString(clone);
+            const svgBlob = new Blob([svgString], { type: 'image/svg+xml;charset=utf-8' });
+            const url = URL.createObjectURL(svgBlob);
+            const img = new Image();
+            const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
+
+            img.onload = () => {
+                const scale = 2;
+                const canvas = document.createElement('canvas');
+                canvas.width = width * scale;
+                canvas.height = height * scale;
+                const ctx = canvas.getContext('2d');
+                ctx.scale(scale, scale);
+                ctx.drawImage(img, 0, 0);
+                canvas.toBlob(blob => {
+                    if (!blob) return;
+                    const link = document.createElement('a');
+                    link.download = `shell-distribution-${stamp}.png`;
+                    link.href = URL.createObjectURL(blob);
+                    link.click();
+                    URL.revokeObjectURL(link.href);
+                    URL.revokeObjectURL(url);
+                }, 'image/png');
+            };
+
+            img.onerror = () => {
+                const link = document.createElement('a');
+                link.download = `shell-distribution-${stamp}.svg`;
+                link.href = url;
+                link.click();
+                URL.revokeObjectURL(url);
+            };
+
+            img.src = url;
+        }
+
+        document.getElementById('shellDistPlotBtn').addEventListener('click', openShellDistModal);
+        document.getElementById('shellDistModalClose').addEventListener('click', closeShellDistModal);
+        document.getElementById('shellDistModalBackdrop').addEventListener('click', closeShellDistModal);
+        document.getElementById('shellDistSaveImage').addEventListener('click', saveShellDistPlotImage);
+        
+        // Initialize welcome message
+        showWelcomeMessage();
+    </script>
+</body>
+</html>
