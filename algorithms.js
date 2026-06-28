@@ -188,16 +188,15 @@ function nodePropagationEntropyKShell(nodes, edges) {
     };
 }
 
-function sigmoidPositionIndex(iter, totalIters) {
-    if (!totalIters) return 0.75;
-    return 0.75 / (1 + Math.exp(-iter / Math.sqrt(totalIters)));
+function sigmoidPositionIndex(iter) {
+    if (!iter) return 0.75;
+    return 0.75 / (1 + Math.exp(-Math.sqrt(iter)));
 }
 
 // Information Entropy k-shell
 function informationEntropyKShell(nodes, edges) {
     const standardResults = standardKShellDecomposition(nodes, edges);
     const { shellAssignments, globalIterByNode, totalGlobalIters } = standardResults;
-    const m = totalGlobalIters || 1;
     const adjacency = buildAdjacency(nodes, edges);
     const degreeById = {};
     nodes.forEach(node => { degreeById[node.id] = node.degree; });
@@ -205,7 +204,7 @@ function informationEntropyKShell(nodes, edges) {
     const positionIndex = {};
     nodes.forEach(node => {
         const iter = globalIterByNode[node.id] || 1;
-        positionIndex[node.id] = sigmoidPositionIndex(iter, m);
+        positionIndex[node.id] = sigmoidPositionIndex(iter);
     });
 
     const pnpByNode = {};
